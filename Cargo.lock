@@ -2453,6 +2453,7 @@ dependencies = [
  "wm-cli",
  "wm-common",
  "wm-ipc-client",
+ "wm-macros",
  "wm-platform",
 ]
 
@@ -2495,6 +2496,15 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "wm-common",
+]
+
+[[package]]
+name = "wm-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.103",
 ]
 
 [[package]]
