@@ -9,19 +9,19 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![feature(iterator_try_collect)]
 
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{Context, Error};
-use tokio::{process::Command, signal};
-use tracing::{debug, error, info, warn, Level};
+use anyhow::Context;
+use tokio::signal;
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::{
   fmt::{self, writer::MakeWriterExt},
   layer::SubscriberExt,
 };
-use wm_common::{AppCommand, InvokeCommand, Verbosity, WmEvent};
+use wm_common::{AppCommand, Verbosity};
 use wm_platform::{
-  Dispatcher, EventLoop, KeybindingListener, MouseListener,
-  NativeWindowExtMacOs, PlatformEvent, Rect, WindowEvent, WindowListener,
+  platform_prelude::*, Dispatcher, EventLoop, KeybindingListener,
+  MouseListener, PlatformEvent, WindowListener,
 };
 
 use crate::{user_config::UserConfig, wm::WindowManager};
@@ -103,13 +103,13 @@ fn main() -> anyhow::Result<()> {
 async fn start_wm(
   config_path: Option<PathBuf>,
   verbosity: Verbosity,
-  mut dispatcher: Dispatcher,
+  dispatcher: Dispatcher,
 ) -> anyhow::Result<()> {
   setup_logging(&verbosity)?;
 
   // These will wait for the event loop to be ready
-  let mut mouse_listener = MouseListener::new(dispatcher.clone())?;
-  let mut window_listener = WindowListener::new(dispatcher.clone())?;
+  let mut _mouse_listener = MouseListener::new(&dispatcher)?;
+  let mut window_listener = WindowListener::new(&dispatcher)?;
 
   tracing::info!("Window manager started.");
   let monitors = dispatcher.displays()?;
@@ -128,8 +128,11 @@ async fn start_wm(
   let windows = dispatcher.all_windows()?;
   for window in windows {
     tracing::info!("Window id: {:?}", window.title());
-    tracing::info!("Window name: {:?}", window.role());
-    tracing::info!("Window bundle id: {:?}", window.bundle_id());
+    #[cfg(target_os = "macos")]
+    {
+      tracing::info!("Window name: {:?}", window.role());
+      tracing::info!("Window bundle id: {:?}", window.bundle_id());
+    }
   }
 
   // Parse and validate user config.

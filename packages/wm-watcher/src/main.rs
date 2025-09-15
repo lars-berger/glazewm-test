@@ -12,7 +12,6 @@ use anyhow::{bail, Context};
 use tracing::info;
 use wm_common::{ClientResponseData, ContainerDto, WindowDto, WmEvent};
 use wm_ipc_client::IpcClient;
-use wm_platform::NativeWindow;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
   let mut managed_handles = query_initial_windows(&mut client)
     .await?
     .into_iter()
-    .map(|window| window.handle)
+    .map(|_window| todo!("Get window handle from WindowDto"))
     .collect::<Vec<_>>();
 
   // Update window handles on window manage/unmanage events.
@@ -38,14 +37,14 @@ async fn main() -> anyhow::Result<()> {
 
       #[cfg(target_os = "windows")]
       {
-        let managed_windows = managed_handles
-          .into_iter()
-          .map(NativeWindow::new)
-          .collect::<Vec<_>>();
-
-        for window in managed_windows {
-          window.cleanup();
-        }
+        todo!("Export NativeWindow::new for wm-watcher");
+        // let managed_windows =
+        //   managed_handles.into_iter().map(NativeWindow::new).
+        // collect::<Vec<_>>();
+        //
+        // for window in managed_windows {
+        //   window.cleanup();
+        // }
       }
     }
   }
@@ -114,9 +113,10 @@ async fn watch_managed_handles(
 
     match event_data {
       Some(WmEvent::WindowManaged { managed_window }) => {
-        if let ContainerDto::Window(window) = managed_window {
-          info!("Watcher added handle: {}.", window.handle);
-          handles.push(window.handle);
+        if let ContainerDto::Window(_window) = managed_window {
+          // TODO: uncomment when WindowDto has handles again
+          // info!("Watcher added handle: {}.", window.handle);
+          // handles.push(window.handle);
         }
       }
       Some(WmEvent::WindowUnmanaged {

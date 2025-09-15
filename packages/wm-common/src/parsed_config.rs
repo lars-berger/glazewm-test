@@ -283,7 +283,9 @@ pub struct CornerEffectConfig {
   pub style: CornerStyle,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+  Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CornerStyle {
   #[default]
@@ -291,6 +293,18 @@ pub enum CornerStyle {
   Square,
   Rounded,
   SmallRounded,
+}
+
+#[cfg(target_os = "windows")]
+impl From<CornerStyle> for wm_platform::platform_prelude::CornerStyle {
+  fn from(style: CornerStyle) -> Self {
+    match style {
+      CornerStyle::Default => Self::Default,
+      CornerStyle::Square => Self::Square,
+      CornerStyle::Rounded => Self::Rounded,
+      CornerStyle::SmallRounded => Self::SmallRounded,
+    }
+  }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

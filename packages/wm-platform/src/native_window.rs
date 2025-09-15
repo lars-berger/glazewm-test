@@ -1,6 +1,6 @@
-#[cfg(target_os = "macos")]
+#[cfg(mac)]
 use objc2_application_services::AXUIElement;
-#[cfg(target_os = "macos")]
+#[cfg(mac)]
 use objc2_core_foundation::CFRetained;
 
 use crate::{platform_impl, Rect};
@@ -14,13 +14,12 @@ use crate::{platform_impl, Rect};
 /// - **Windows**: `isize` (`HWND`)
 /// - **macOS**: `u32` (`CGWindowID`)
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WindowId(
-  #[cfg(target_os = "windows")] pub(crate) isize,
-  #[cfg(target_os = "macos")] pub(crate) u32,
-);
+pub struct WindowId<
+  Id: Copy + core::fmt::Debug = crate::platform_impl::RawWindowId,
+>(pub(crate) Id);
 
 impl WindowId {
-  #[cfg(target_os = "macos")]
+  #[cfg(mac)]
   pub(crate) fn from_window_element(el: &CFRetained<AXUIElement>) -> Self {
     let mut window_id = 0;
 
@@ -43,12 +42,51 @@ pub enum ZOrder {
   TopMost,
 }
 
-#[derive(Clone, Debug)]
-pub struct NativeWindow {
-  pub(crate) inner: platform_impl::NativeWindow,
+pub trait PlatformWindow: Clone + core::fmt::Debug {
+  fn id(&self) -> WindowId;
+  /// Gets the window's title. If the window is invalid, returns an empty
+  /// string.
+  fn title(&self) -> crate::Result<String>;
+  /// Gets the window's position, including the window's frame. Excludes
+  /// the window's shadow borders.
+  fn frame(&self) -> crate::Result<Rect>;
+  fn position(&self) -> crate::Result<(f64, f64)>;
+  fn size(&self) -> crate::Result<(f64, f64)>;
+  /// Whether the window is actually visible.
+  fn is_visible(&self) -> crate::Result<bool>;
+  /// Whether the window is minimized.
+  fn is_minimized(&self) -> crate::Result<bool>;
+  /// Whether the window is maximized.
+  fn is_maximized(&self) -> crate::Result<bool>;
+  fn resize(&self, width: f64, height: f64) -> crate::Result<()>;
+  fn reposition(&self, x: f64, y: f64) -> crate::Result<()>;
+  fn set_frame(&self, rect: &Rect) -> crate::Result<()>;
+  fn minimize(&self) -> crate::Result<()>;
+  fn maximize(&self) -> crate::Result<()>;
+  fn close(&self) -> crate::Result<()>;
 }
 
-impl NativeWindow {
+#[cfg(win)]
+use crate::platform_impl::{
+  ambassador_impl_NativeWindowWindowsExt, NativeWindowWindowsExt,
+};
+
+#[derive(Clone, Debug)]
+#[cfg_attr(win, derive(ambassador::Delegate))]
+#[cfg_attr(win, delegate(NativeWindowWindowsExt, target = "inner"))]
+pub struct NativeWindow<
+  T: PlatformWindow = platform_impl::NativeWindowInner,
+> {
+  pub(crate) inner: T,
+}
+
+impl<T: PlatformWindow> From<T> for NativeWindow<T> {
+  fn from(inner: T) -> Self {
+    Self { inner }
+  }
+}
+
+impl<T: PlatformWindow> NativeWindow<T> {
   #[must_use]
   pub fn id(&self) -> WindowId {
     self.inner.id()
@@ -139,7 +177,10 @@ impl NativeWindow {
     self.inner.close()
   }
 
-  pub fn is_fullscreen(&self, monitor_rect: &Rect) -> crate::Result<bool> {
+  pub fn is_fullscreen(
+    &self,
+    _monitor_rect: &Rect,
+  ) -> crate::Result<bool> {
     // TODO: Implement this.
     Ok(false)
   }
@@ -150,10 +191,10 @@ impl NativeWindow {
   }
 }
 
-impl PartialEq for NativeWindow {
+impl<T: PlatformWindow> PartialEq for NativeWindow<T> {
   fn eq(&self, other: &Self) -> bool {
     self.inner.id() == other.inner.id()
   }
 }
 
-impl Eq for NativeWindow {}
+impl<T: PlatformWindow> Eq for NativeWindow<T> {}

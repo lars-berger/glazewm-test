@@ -599,7 +599,7 @@ impl Drop for WmState {
       .map(|window| window.native().clone())
       .collect::<Vec<_>>();
 
-    for window in managed_windows {
+    for _window in managed_windows {
       // TODO: Implement this.
       // window.cleanup();
     }

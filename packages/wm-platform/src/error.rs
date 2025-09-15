@@ -4,11 +4,11 @@ pub enum Error {
   Io(#[from] std::io::Error),
 
   #[error(transparent)]
-  #[cfg(target_os = "windows")]
+  #[cfg(win)]
   Windows(#[from] windows::core::Error),
 
   #[error("Accessibility operation failed for attribute {0} with error code: {1}")]
-  #[cfg(target_os = "macos")]
+  #[cfg(mac)]
   Accessibility(String, i32),
 
   #[error(transparent)]
@@ -18,7 +18,7 @@ pub enum Error {
   InvalidPointer(String),
 
   #[error("AXValue creation failed: {0}")]
-  #[cfg(target_os = "macos")]
+  #[cfg(mac)]
   AXValueCreation(String),
 
   #[error(transparent)]

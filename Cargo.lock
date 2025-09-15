@@ -246,6 +246,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
 name = "clap"
 version = "4.5.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2512,7 +2518,9 @@ name = "wm-platform"
 version = "0.0.0"
 dependencies = [
  "accessibility-sys",
+ "ambassador",
  "anyhow",
+ "cfg_aliases",
  "dispatch2",
  "home",
  "libtest-mimic-collect",

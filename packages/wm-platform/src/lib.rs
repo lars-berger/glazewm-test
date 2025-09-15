@@ -26,10 +26,14 @@ pub use models::*;
 pub use mouse_listener::*;
 pub use native_window::*;
 pub use platform_event::*;
-#[cfg(target_os = "macos")]
-pub use platform_impl::{
-  DisplayDeviceExtMacOs, DisplayExtMacOs, NativeWindowExtMacOs,
-};
-#[cfg(target_os = "windows")]
-pub use platform_impl::{DisplayDeviceExtWindows, DisplayExtWindows};
+
+pub mod platform_prelude {
+  #[cfg(mac)]
+  pub use platform_impl::{
+    DisplayDeviceExtMacOs, DisplayExtMacOs, NativeWindowExtMacOs,
+  };
+
+  #[cfg(win)]
+  pub use super::platform_impl::prelude::*;
+}
 pub use window_listener::*;

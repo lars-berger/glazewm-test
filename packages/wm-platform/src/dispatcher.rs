@@ -3,7 +3,7 @@ use std::sync::{
   Arc,
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(mac)]
 use crate::platform_impl::Application;
 use crate::{platform_impl, Display, DisplayDevice, NativeWindow, Point};
 
@@ -11,7 +11,7 @@ use crate::{platform_impl, Display, DisplayDevice, NativeWindow, Point};
 pub type DispatchFn = dyn FnOnce() + Send + 'static;
 
 /// macOS-specific extensions for `Dispatcher`.
-#[cfg(target_os = "macos")]
+#[cfg(mac)]
 pub trait DispatcherExtMacOs {
   /// Gets all running applications.
   ///
@@ -21,7 +21,7 @@ pub trait DispatcherExtMacOs {
   fn all_applications(&self) -> crate::Result<Vec<Application>>;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(mac)]
 impl DispatcherExtMacOs for Dispatcher {
   fn all_applications(&self) -> crate::Result<Vec<Application>> {
     platform_impl::all_applications(self)
@@ -153,15 +153,11 @@ impl Dispatcher {
   /// Get whether the current thread is the main thread.
   #[must_use]
   pub fn is_main_thread(&self) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-      use objc2::MainThreadMarker;
-      MainThreadMarker::new().is_some()
-    }
-    #[cfg(target_os = "windows")]
-    {
-      use windows::Win32::System::Threading::GetCurrentThreadId;
-      self.source.thread_id == unsafe { GetCurrentThreadId() }
+    if let Some(source) = &self.source {
+      source.is_main_thread()
+    } else {
+      tracing::error!("Dispatcher has no event loop source, cannot check for main thread safely on all platforms. Returning false");
+      false
     }
   }
 

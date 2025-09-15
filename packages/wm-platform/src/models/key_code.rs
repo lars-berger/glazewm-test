@@ -44,7 +44,7 @@ macro_rules! impl_key_code_conversion {
   (
     $(
       $variant:ident => {
-        $(windows: $win_code:expr,)?
+        $(windows: $win_code:ident,)?
         $(macos: $mac_code:expr,)?
       }
     ),* $(,)?
@@ -56,6 +56,7 @@ macro_rules! impl_key_code_conversion {
       fn try_from(key_code: KeyCode) -> Result<Self, Self::Error> {
         // LINT: Allow unreachable patterns since modifier keys are
         // duplicated (e.g. `LShift` and `Shift`).
+        #[allow(unreachable_patterns)]
         match VIRTUAL_KEY(key_code.0) {
           $($($win_code => Ok(Key::$variant),)?)*
           _ => Err(KeyConversionError::UnknownKeyCode(key_code)),
@@ -82,6 +83,7 @@ macro_rules! impl_key_code_conversion {
       type Error = KeyConversionError;
 
       fn try_from(key: Key) -> Result<Self, Self::Error> {
+        #[allow(unreachable_patterns)]
         match key {
           $(Key::$variant => {
             #[cfg(target_os = "windows")]
@@ -96,7 +98,9 @@ macro_rules! impl_key_code_conversion {
               #[allow(unreachable_code)]
               return Err(KeyConversionError::UnknownKeyCode(KeyCode(0)));
             }
-          }),*
+          }),*,
+          #[cfg(target_os = "windows")]
+          Key::Raw(code) => Ok(KeyCode(code.0)),
         }
       }
     }

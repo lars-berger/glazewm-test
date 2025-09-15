@@ -1,13 +1,8 @@
 use std::{
-  cell::RefCell,
-  sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, LazyLock,
-  },
+  sync::{atomic::AtomicBool, Arc, LazyLock},
   thread::{self, JoinHandle},
 };
 
-use anyhow::bail;
 use windows::{
   core::w,
   Win32::{
@@ -15,49 +10,47 @@ use windows::{
     System::Threading::GetCurrentThreadId,
     UI::WindowsAndMessaging::{
       DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-      PostMessageW, PostThreadMessageW, RegisterWindowMessageA,
-      TranslateMessage, MSG, PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND,
-      PBT_APMSUSPEND, WM_DEVICECHANGE, WM_DISPLAYCHANGE, WM_INPUT,
-      WM_POWERBROADCAST, WM_QUIT, WM_SETTINGCHANGE,
+      PostMessageW, PostThreadMessageW, RegisterWindowMessageW,
+      TranslateMessage, MSG, WM_QUIT,
     },
   },
 };
 
 use crate::{DispatchFn, Dispatcher};
 
-thread_local! {
-  /// Custom message ID for dispatching closures to be run on the event
-  /// loop thread.
-  ///
-  /// `WPARAM` contains a `Box<Box<dyn FnOnce()>>` that must be retrieved
-  /// with `Box::from_raw`. `LPARAM` is unused.
-  ///
-  /// This message is sent using `PostMessageW` and handled in
-  /// [`EventLoop::window_proc`].
-  static WM_DISPATCH_CALLBACK: u32 = RegisterWindowMessageW(w!("GlazeWM:Dispatch"));
-}
+/// Custom message ID for dispatching closures to be run on the event
+/// loop thread.
+///
+/// `WPARAM` contains a `Box<Box<dyn FnOnce()>>` that must be retrieved
+/// with `Box::from_raw`. `LPARAM` is unused.
+///
+/// This message is sent using `PostMessageW` and handled in
+/// [`EventLoop::window_proc`].
+static WM_DISPATCH_CALLBACK: LazyLock<u32> = LazyLock::new(|| unsafe {
+  RegisterWindowMessageW(w!("GlazeWM:Dispatch"))
+});
 
 #[derive(Clone)]
 pub(crate) struct EventLoopSource {
-  message_window_handle: crate::WindowHandle,
+  message_window_handle: crate::WindowId,
   thread_id: u32,
 }
 
 impl EventLoopSource {
   pub fn send_dispatch(
     &self,
-    dispatch_fn: DispatchFn,
+    dispatch_fn: Box<DispatchFn>,
   ) -> crate::Result<()> {
     // Double box the callback to avoid `STATUS_ACCESS_VIOLATION` on
     // Windows. Ref Tao's implementation: https://github.com/tauri-apps/tao/blob/dev/src/platform_impl/windows/event_loop.rs#L596
-    let dispatch_fn: DispatchFn = Box::new(Box::new(dispatch_fn));
+    let dispatch_fn = Box::new(dispatch_fn);
 
     // Leak to a raw pointer to then be passed as `WPARAM` in the message.
-    let callback_ptr = Box::into_raw(Box::new(dispatch_fn));
+    let callback_ptr = Box::into_raw(dispatch_fn);
 
     unsafe {
       if PostMessageW(
-        HWND(self.message_window_handle),
+        HWND(self.message_window_handle.0),
         *WM_DISPATCH_CALLBACK,
         WPARAM(callback_ptr as _),
         LPARAM(0),
@@ -79,26 +72,30 @@ impl EventLoopSource {
     unsafe {
       PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0))
     }
-    .ok()
     .map_err(|_| {
       crate::Error::WindowMessage(
         "Failed to post quit message".to_string(),
       )
     })
   }
+
+  pub fn is_main_thread(&self) -> bool {
+    let thread_id = unsafe { GetCurrentThreadId() };
+    self.thread_id == thread_id
+  }
 }
 
 /// Windows-specific implementation of [`EventLoop`].
 pub(crate) struct EventLoop {
-  message_window_handle: crate::WindowHandle,
+  message_window_handle: crate::WindowId,
   thread_handle: Option<JoinHandle<crate::Result<()>>>,
   thread_id: u32,
 }
 
 impl EventLoop {
-  pub fn new() -> crate::Result<(Self, super::Dispatcher)> {
+  pub fn new() -> crate::Result<(Self, crate::Dispatcher)> {
     let (sender, receiver) =
-      tokio::sync::oneshot::channel::<(crate::WindowHandle, u32)>();
+      tokio::sync::oneshot::channel::<(crate::WindowId, u32)>();
 
     let thread_handle = thread::spawn(move || -> crate::Result<()> {
       // Create a hidden message window on the current thread.
@@ -110,9 +107,12 @@ impl EventLoop {
       // Send the window handle and thread ID back to the main thread. Will
       // only fail if the receiver was closed, which would be due to the
       // main thread erroring - so just bail.
-      if sender.send((window_handle, thread_id)).is_err() {
+      if sender
+        .send((crate::WindowId(window_handle), thread_id))
+        .is_err()
+      {
         unsafe { DestroyWindow(HWND(window_handle)) }?;
-        bail!("Failed to send window handle back to main thread, channel was closed.");
+        return Err(crate::Error::Platform("Failed to send window handle back to main thread, channel was closed.".into()));
       }
 
       // Run the message loop. This will block until `WM_QUIT` is
@@ -126,9 +126,12 @@ impl EventLoop {
     });
 
     // Wait for the window handle and thread ID.
-    let (window_handle, thread_id) = receiver
-      .blocking_recv()
-      .map_err(|e| crate::Error::ChannelRecv(e))?;
+    let (window_handle, thread_id) =
+      receiver.blocking_recv().map_err(|e| {
+        crate::Error::Platform(
+          "Event Loop failed to start and return thread id".into(),
+        )
+      })?;
 
     let event_loop = EventLoop {
       message_window_handle: window_handle,
@@ -174,11 +177,11 @@ impl EventLoop {
 
     // Wait for the spawned thread to finish.
     if let Some(thread_handle) = self.thread_handle.take() {
-      Platform::kill_message_loop(&thread_handle)?;
+      crate::platform_impl::Platform::kill_message_loop(&thread_handle)?;
 
-      thread_handle
-        .join()
-        .map_err(|_| anyhow::anyhow!("Thread join failed."))??;
+      thread_handle.join().map_err(|_| {
+        crate::Error::Thread("Message thread failed to rejoin".into())
+      })??;
     }
 
     Ok(())
@@ -202,7 +205,7 @@ impl EventLoop {
 
   /// Returns the window handle of the message loop.
   #[must_use]
-  pub fn message_window_handle(&self) -> crate::WindowHandle {
+  pub fn message_window_handle(&self) -> crate::WindowId {
     self.message_window_handle
   }
 
@@ -214,17 +217,17 @@ impl EventLoop {
     lparam: LPARAM,
   ) -> LRESULT {
     // TODO: Allow listeners to pre-process messages.
-    match msg {
-      WM_DISPATCH_CALLBACK => {
-        // Convert the `WPARAM` fn pointer back to a double boxed function.
-        let dispatch_fn: DispatchFn = Box::from_raw(wparam.0 as *mut _);
-        dispatch_fn();
-        LRESULT(0)
-      }
-
-      // `WM_QUIT` is handled for us by the message loop and should be
-      // forwarded along with other messages we don't care about.
-      _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    if msg == *WM_DISPATCH_CALLBACK {
+      // Convert the `WPARAM` fn pointer back to a double boxed function.
+      let dispatch_fn: Box<Box<DispatchFn>> =
+        Box::from_raw(wparam.0 as *mut _);
+      dispatch_fn();
+      LRESULT(0)
+    }
+    // `WM_QUIT` is handled for us by the message loop and should be
+    // forwarded along with other messages we don't care about.
+    else {
+      DefWindowProcW(hwnd, msg, wparam, lparam)
     }
   }
 

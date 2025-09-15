@@ -194,6 +194,9 @@ pub enum Key {
   OemComma,
   OemMinus,
   OemPeriod,
+
+  #[cfg(target_os = "windows")]
+  Raw(KeyCode),
 }
 
 impl Key {
@@ -216,11 +219,14 @@ impl Key {
     #[cfg(target_os = "windows")]
     {
       use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetKeyState, GetKeyboardLayout, VkKeyScanExW,
+        GetKeyboardLayout, VkKeyScanExW,
       };
 
       // Check if the key exists on the current keyboard layout.
-      let utf16_key = key_str.encode_utf16().next()?;
+      let utf16_key = key_str
+        .encode_utf16()
+        .next()
+        .ok_or(KeyParseError::UnknownKey(key_str.into()))?;
       let layout = unsafe { GetKeyboardLayout(0) };
       let vk_code = unsafe { VkKeyScanExW(utf16_key, layout) };
 
@@ -274,6 +280,8 @@ macro_rules! impl_key_parsing {
             let aliases = &[$($str_name),+];
             write!(f, "{}", aliases[0])
           },)*
+          #[cfg(target_os = "windows")]
+          Key::Raw(code) => write!(f, "raw({})", code),
         }
       }
     }
@@ -283,6 +291,8 @@ macro_rules! impl_key_parsing {
       pub fn all_aliases(&self) -> Option<&'static [&'static str]> {
         match self {
           $(Key::$variant => Some(&[$($str_name),+]),)*
+          #[cfg(target_os = "windows")]
+            Key::Raw(_) => None,
         }
       }
     }

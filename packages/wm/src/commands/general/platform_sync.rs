@@ -7,7 +7,7 @@ use wm_common::{
   CornerStyle, CursorJumpTrigger, DisplayState, HideMethod, UniqueExt,
   WindowEffectConfig, WindowState, WmEvent,
 };
-use wm_platform::{OpacityValue, ZOrder};
+use wm_platform::{platform_prelude::*, OpacityValue, ZOrder};
 
 use crate::{
   models::{Container, WindowContainer},
@@ -335,6 +335,7 @@ fn jump_cursor(
       let target_monitor =
         focused_container.monitor().context("No monitor.")?;
 
+      // FIXME: This is using `Platform::mouse_position` directly.
       let cursor_monitor = Platform::mouse_position()
         .ok()
         .and_then(|pos| state.monitor_at_point(&pos));
@@ -445,7 +446,7 @@ fn apply_corner_effect(
     &CornerStyle::Default
   };
 
-  _ = window.native().set_corner_style(corner_style);
+  _ = window.native().set_corner_style(&(*corner_style).into());
 }
 
 #[cfg(target_os = "windows")]

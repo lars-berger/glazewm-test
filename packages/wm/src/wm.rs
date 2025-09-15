@@ -7,7 +7,8 @@ use wm_common::{
   TitleBarVisibility, WindowState, WmEvent,
 };
 use wm_platform::{
-  Dispatcher, LengthValue, PlatformEvent, RectDelta, WindowEvent,
+  platform_prelude::*, Dispatcher, LengthValue, PlatformEvent, RectDelta,
+  WindowEvent,
 };
 
 use crate::{
@@ -102,12 +103,15 @@ impl WindowManager {
         // Return early since we don't want to redraw twice.
         return Ok(());
       }
-      PlatformEvent::MouseMove(event) => {
+
+      PlatformEvent::MouseMove(_event) => {
+        // TODO:
         // handle_mouse_move(&event, state, config)
         Ok(())
       }
       PlatformEvent::Window(window_event) => match window_event {
-        WindowEvent::Focus(window) => {
+        WindowEvent::Focus(_window) => {
+          // TODO:
           // handle_window_focused(&window, state, config)
           Ok(())
         }
@@ -757,7 +761,6 @@ impl WindowManager {
         toggle_pause(state);
         Ok(())
       }
-      _ => Ok(()),
     }
   }
 }

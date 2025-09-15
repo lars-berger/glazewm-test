@@ -1,6 +1,9 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
-use crate::{platform_impl, Dispatcher};
+#[cfg(win)]
+use windows::Win32::Foundation::HWND;
+
+use crate::Dispatcher;
 
 /// An installer for integrating [`Dispatcher`] with an existing
 /// event loop.
@@ -24,7 +27,7 @@ impl EventLoopInstaller {
   /// # Platform-specific
   ///
   /// This method is only available on macOS.
-  #[cfg(target_os = "macos")]
+  #[cfg(mac)]
   pub fn install(self) -> crate::Result<()> {
     let _source = platform_impl::EventLoop::add_dispatch_source()?;
 
@@ -41,8 +44,9 @@ impl EventLoopInstaller {
   /// # Platform-specific
   ///
   /// This method is only available on Windows.
-  #[cfg(target_os = "windows")]
-  pub fn install_with_subclass(self, hwnd: HWND) -> crate::Result<()> {
-    self.inner.install_with_subclass(hwnd)
+  #[cfg(win)]
+  pub fn install_with_subclass(self, _hwnd: HWND) -> crate::Result<()> {
+    todo!();
+    // self.inner.install_with_subclass(hwnd)
   }
 }

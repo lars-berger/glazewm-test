@@ -1,6 +1,7 @@
 use anyhow::Context;
 use tracing::{info, warn};
 use wm_common::{HideMethod, ParsedConfig, WindowRuleEvent, WmEvent};
+use wm_platform::platform_prelude::*;
 
 use crate::{
   commands::{window::run_window_rules, workspace::sort_workspaces},

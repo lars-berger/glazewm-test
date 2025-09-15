@@ -4,7 +4,6 @@ use std::{
   thread::JoinHandle,
 };
 
-use anyhow::{bail, Context};
 use windows::{
   core::{w, PCWSTR},
   Win32::{
@@ -33,11 +32,11 @@ use windows::{
   },
 };
 
-use super::{
-  native_monitor, native_window, EventListener, NativeMonitor,
-  NativeWindow, SingleInstance,
+use super::{native_window, SingleInstance};
+use crate::{
+  platform_impl::{Display, NativeWindowInner, __private_display},
+  Point,
 };
-use crate::{ParsedConfig, Point};
 
 pub type WindowProcedure = WNDPROC;
 
@@ -46,9 +45,9 @@ pub struct Platform;
 impl Platform {
   /// Gets the `NativeWindow` instance of the currently focused window.
   #[must_use]
-  pub fn foreground_window() -> NativeWindow {
+  pub fn foreground_window() -> NativeWindowInner {
     let handle = unsafe { GetForegroundWindow() };
-    NativeWindow::new(handle.0)
+    NativeWindowInner::new(handle.0)
   }
 
   /// Gets the `NativeWindow` instance of the desktop window.
@@ -57,13 +56,13 @@ impl Platform {
   /// explorer.exe isn't running, then default to the desktop window below
   /// the wallpaper window.
   #[must_use]
-  pub fn desktop_window() -> NativeWindow {
+  pub fn desktop_window() -> NativeWindowInner {
     let handle = match unsafe { GetShellWindow() } {
       HWND(0) => unsafe { GetDesktopWindow() },
       handle => handle,
     };
 
-    NativeWindow::new(handle.0)
+    NativeWindowInner::new(handle.0)
   }
 
   /// Gets a vector of available monitors as `NativeMonitor` instances
@@ -71,15 +70,15 @@ impl Platform {
   ///
   /// Note that this also ensures that the `NativeMonitor` instances have
   /// valid position values.
-  pub fn sorted_monitors() -> crate::Result<Vec<NativeMonitor>> {
-    let monitors = native_monitor::available_monitors()?;
+  pub fn sorted_monitors() -> crate::Result<Vec<Display>> {
+    let monitors = __private_display::all_displays()?;
 
     // Create a tuple of monitors and their rects.
     let mut monitors_with_rect = monitors
       .into_iter()
-      .map(|monitor| {
-        let rect = monitor.rect()?.clone();
-        anyhow::Ok((monitor, rect))
+      .map(|monitor| -> crate::Result<(Display, crate::Rect)> {
+        let rect = monitor.bounds()?.clone();
+        Ok((monitor, rect))
       })
       .try_collect::<Vec<_>>()?;
 
@@ -102,8 +101,8 @@ impl Platform {
   }
 
   #[must_use]
-  pub fn nearest_monitor(window: &NativeWindow) -> NativeMonitor {
-    native_monitor::nearest_monitor(window.handle)
+  pub fn nearest_monitor(window: &NativeWindowInner) -> Display {
+    todo!("Get nearest monitor for windows");
   }
 
   /// Gets a vector of "manageable" windows as `NativeWindow` instances.
@@ -111,20 +110,13 @@ impl Platform {
   /// Manageable windows are visible windows that the WM is most likely
   /// able to manage. Windows are returned in z-order (top to bottom),
   /// although the order is not guaranteed by the underlying API.
-  pub fn manageable_windows() -> crate::Result<Vec<NativeWindow>> {
+  pub fn manageable_windows() -> crate::Result<Vec<NativeWindowInner>> {
     Ok(
-      native_window::available_windows()?
+      native_window::__private_window::all_windows()?
         .into_iter()
         .filter(|window| window.is_manageable().unwrap_or(false))
         .collect(),
     )
-  }
-
-  /// Creates a new `EventListener` for the specified user config.
-  pub fn start_event_listener(
-    config: &ParsedConfig,
-  ) -> crate::Result<EventListener> {
-    EventListener::start(config)
   }
 
   /// Creates a new `SingleInstance`.
@@ -134,10 +126,10 @@ impl Platform {
 
   // Gets the root window of the specified window.
   pub fn root_ancestor(
-    window: &NativeWindow,
-  ) -> crate::Result<NativeWindow> {
+    window: &NativeWindowInner,
+  ) -> crate::Result<NativeWindowInner> {
     let handle = unsafe { GetAncestor(HWND(window.handle), GA_ROOT) };
-    Ok(NativeWindow::new(handle.0))
+    Ok(NativeWindowInner::new(handle.0))
   }
 
   /// Sets the cursor position to the specified coordinates.
@@ -150,14 +142,16 @@ impl Platform {
   }
 
   /// Finds the window at the specified point in screen space.
-  pub fn window_from_point(point: &Point) -> crate::Result<NativeWindow> {
+  pub fn window_from_point(
+    point: &Point,
+  ) -> crate::Result<NativeWindowInner> {
     let point = POINT {
       x: point.x,
       y: point.y,
     };
 
     let handle = unsafe { WindowFromPoint(point) };
-    Ok(NativeWindow::new(handle.0))
+    Ok(NativeWindowInner::new(handle.0))
   }
 
   /// Gets the mouse position in screen space.
@@ -204,7 +198,9 @@ impl Platform {
     };
 
     if handle.0 == 0 {
-      bail!("Creation of message window failed.");
+      return Err(crate::Error::Platform(
+        "Failed to create message window.".into(),
+      ));
     }
 
     Ok(handle.0)
@@ -241,7 +237,7 @@ impl Platform {
 
     if has_message {
       if msg.message == WM_QUIT {
-        bail!("Received WM_QUIT message.")
+        return Err(crate::Error::EventLoopStopped);
       }
 
       unsafe {
@@ -364,10 +360,10 @@ impl Platform {
       };
 
       if size == 0 {
-        anyhow::bail!(
+        return Err(crate::Error::Platform(format!(
           "Failed to expand environment strings in command '{}'.",
-          command
-        );
+          command,
+        )));
       }
 
       let mut buffer = vec![0; size as usize];
@@ -390,8 +386,10 @@ impl Platform {
     if command.starts_with('"') {
       // Find the closing double quote.
       let (closing_index, _) =
-        command.match_indices('"').nth(2).with_context(|| {
-          format!("Command doesn't have an ending `\"`: '{command}'.")
+        command.match_indices('"').nth(2).ok_or_else(|| {
+          crate::Error::Platform(format!(
+            "Command doesn't have an ending `\"`: '{command}'."
+          ))
         })?;
 
       return Ok((
@@ -423,7 +421,10 @@ impl Platform {
       }
     }
 
-    anyhow::bail!("Program path is not valid for command '{}'.", command)
+    Err(crate::Error::Platform(format!(
+      "Program path is not valid for command '{}'.",
+      command
+    )))
   }
 
   /// Runs the specified program with the given arguments.
@@ -433,9 +434,11 @@ impl Platform {
     hide_window: bool,
   ) -> crate::Result<()> {
     let home_dir = home::home_dir()
-      .context("Unable to get home directory.")?
+      .ok_or(crate::Error::Platform(
+        "Failed to get home directory".into(),
+      ))?
       .to_str()
-      .context("Invalid home directory.")?
+      .ok_or(crate::Error::Platform("Invalid home directory.".into()))?
       .to_owned();
 
     // Inlining the wide variables within the `SHELLEXECUTEINFOW` struct

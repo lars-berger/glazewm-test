@@ -20,6 +20,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 regex = { workspace = true }
+ambassador = "0.4"
 
 [dev-dependencies]
 libtest-mimic-collect = "0.3.2"
@@ -46,14 +47,14 @@ windows = { version = "0.52", features = [
   "Win32_UI_Shell_Common",
   "Win32_UI_TextServices",
   "Win32_UI_WindowsAndMessaging",
-] }
-windows-interface = { version = "0.52" }
+], optional = true }
+windows-interface = { version = "0.52", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-accessibility-sys = "0.2"
-dispatch2 = "0.3"
-objc2-core-graphics = "0.3.1"
-objc2 = "0.6.1"
+accessibility-sys = { version = "0.2", optional = true }
+dispatch2 = { version = "0.3", optional = true }
+objc2-core-graphics = { version = "0.3.1", optional = true }
+objc2 = { version = "0.6.1", optional = true }
 objc2-app-kit = { version = "0.3.1", default-features = false, features = [
   "NSApplication",
   "NSEvent",
@@ -65,9 +66,11 @@ objc2-app-kit = { version = "0.3.1", default-features = false, features = [
   "NSWorkspace",
   "libc",
   "objc2-core-foundation",
-] }
-objc2-application-services = "0.3.1"
-objc2-core-foundation = { version = "0.3.1", features = ["CFCGTypes"] }
+], optional = true }
+objc2-application-services = { version = "0.3.1", optional = true }
+objc2-core-foundation = { version = "0.3.1", features = [
+  "CFCGTypes",
+], optional = true }
 objc2-foundation = { version = "0.3.1", default-features = false, features = [
   "NSArray",
   "NSEnumerator",
@@ -76,4 +79,26 @@ objc2-foundation = { version = "0.3.1", default-features = false, features = [
   "NSString",
   "NSThread",
   "NSValue",
-] }
+], optional = true }
+
+[build-dependencies]
+cfg_aliases = "0.2.1"
+
+[features]
+# Default to both Platforms, `cfg_aliases` is used to check for platform and target OS
+default = ["win", "mac"]
+# No platform
+detached = []
+# Windows platform
+win = ["dep:windows", "dep:windows-interface"]
+# MacOS platform
+mac = [
+  "dep:accessibility-sys",
+  "dep:dispatch2",
+  "dep:objc2-core-graphics",
+  "dep:objc2",
+  "dep:objc2-app-kit",
+  "dep:objc2-application-services",
+  "dep:objc2-core-foundation",
+  "dep:objc2-foundation",
+]

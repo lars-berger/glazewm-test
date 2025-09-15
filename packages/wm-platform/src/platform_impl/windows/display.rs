@@ -1,27 +1,22 @@
 use windows::{
   core::PCWSTR,
   Win32::{
-    Foundation::{BOOL, LPARAM, RECT},
     Graphics::Gdi::{
-      EnumDisplayDevicesW, EnumDisplayMonitors, EnumDisplaySettingsW,
-      GetMonitorInfoW, DEVMODEW, DISPLAY_DEVICEW, DISPLAY_DEVICE_ACTIVE,
-      DISPLAY_DEVICE_MIRRORING_DRIVER, HDC, HMONITOR, MONITORINFO,
+      EnumDisplayDevicesW, EnumDisplaySettingsW, GetMonitorInfoW,
+      DEVMODEW, DISPLAY_DEVICEW, DISPLAY_DEVICE_ACTIVE,
+      DISPLAY_DEVICE_MIRRORING_DRIVER, HMONITOR, MONITORINFO,
       MONITORINFOEXW,
     },
-    UI::{
-      HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
-      WindowsAndMessaging::EDD_GET_DEVICE_INTERFACE_NAME,
-    },
+    UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
   },
 };
-use crate::{Point, Rect};
 
 use crate::{
   display::{
     ConnectionState, DisplayDeviceId, DisplayId, MirroringState,
     OutputTechnology,
   },
-  Result,
+  Dispatcher, Point, Rect, Result,
 };
 
 /// Windows-specific extensions for `Display`.
@@ -46,7 +41,7 @@ pub trait DisplayDeviceExtWindows {
 
 impl DisplayExtWindows for crate::Display {
   fn hmonitor(&self) -> HMONITOR {
-    HMONITOR(self.inner.hmonitor())
+    self.inner.hmonitor()
   }
 }
 
@@ -57,7 +52,7 @@ impl DisplayDeviceExtWindows for crate::DisplayDevice {
 }
 
 /// Windows-specific display implementation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Display {
   pub(crate) monitor_handle: isize,
 }
@@ -145,7 +140,7 @@ impl Display {
   /// Gets the display devices for this display.
   pub fn devices(&self) -> Result<Vec<crate::display::DisplayDevice>> {
     let device_name = self.device_name()?;
-    let all_devices = all_display_devices()?;
+    let all_devices = __private_display::all_display_devices()?;
 
     // Filter devices that match this display's device name.
     Ok(
@@ -158,9 +153,7 @@ impl Display {
   }
 
   /// Gets the main device (first non-mirroring device) for this display.
-  pub fn main_device(
-    &self,
-  ) -> Result<Option<crate::display::DisplayDevice>> {
+  pub fn main_device(&self) -> Result<crate::display::DisplayDevice> {
     let devices = self.devices()?;
 
     // Find first device that is not mirroring
@@ -169,18 +162,24 @@ impl Display {
       if mirroring_state.is_none()
         || mirroring_state == Some(MirroringState::Source)
       {
-        return Ok(Some(device));
+        return Ok(device);
       }
     }
 
-    Ok(None)
+    Err(crate::Error::DisplayDeviceNotFound)
   }
 
   /// Gets the monitor info structure from Windows API.
   fn monitor_info(&self) -> Result<MONITORINFOEXW> {
     let mut monitor_info = MONITORINFOEXW {
       monitorInfo: MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFOEXW>().try_into()?,
+        cbSize: std::mem::size_of::<MONITORINFOEXW>().try_into().map_err(
+          |e| {
+            crate::Error::Platform(format!(
+              "Failed to cast size of MONITORINFOEXW: {e}"
+            ))
+          },
+        )?,
         ..Default::default()
       },
       ..Default::default()
@@ -209,7 +208,7 @@ impl Display {
 }
 
 /// Windows-specific display device implementation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayDevice {
   pub(crate) device_name: String,
   pub(crate) hardware_id: String,
@@ -233,7 +232,8 @@ impl DisplayDevice {
   /// Gets the rotation of the device in degrees.
   pub fn rotation(&self) -> Result<f32> {
     let device_mode = self.current_device_mode()?;
-    let orientation = device_mode.dmDisplayOrientation;
+    let orientation =
+      unsafe { device_mode.Anonymous1.Anonymous1.dmOrientation };
 
     Ok(match orientation {
       0 => 0.0,
@@ -297,7 +297,13 @@ impl DisplayDevice {
   /// Gets the device string from Windows API.
   fn device_string(&self) -> Result<String> {
     let mut display_device = DISPLAY_DEVICEW {
-      cb: std::mem::size_of::<DISPLAY_DEVICEW>().try_into()?,
+      cb: std::mem::size_of::<DISPLAY_DEVICEW>().try_into().map_err(
+        |e| {
+          crate::Error::Platform(format!(
+            "Failed to cast size of DISPLAY_DEVICEW: {e}"
+          ))
+        },
+      )?,
       ..Default::default()
     };
 
@@ -339,7 +345,13 @@ impl DisplayDevice {
   /// Gets the state flags from Windows API.
   fn state_flags(&self) -> Result<u32> {
     let mut display_device = DISPLAY_DEVICEW {
-      cb: std::mem::size_of::<DISPLAY_DEVICEW>().try_into()?,
+      cb: std::mem::size_of::<DISPLAY_DEVICEW>().try_into().map_err(
+        |_| {
+          crate::Error::Platform(
+            "Failed to cast size of DISPLAY_DEVICEW".into(),
+          )
+        },
+      )?,
       ..Default::default()
     };
 
@@ -377,7 +389,11 @@ impl DisplayDevice {
   /// Gets the current device mode from Windows API.
   fn current_device_mode(&self) -> Result<DEVMODEW> {
     let mut device_mode = DEVMODEW {
-      dmSize: std::mem::size_of::<DEVMODEW>().try_into()?,
+      dmSize: std::mem::size_of::<DEVMODEW>().try_into().map_err(
+        |_| {
+          crate::Error::Platform("Failed to cast size of DEVMODEW".into())
+        },
+      )?,
       ..Default::default()
     };
 
@@ -386,7 +402,9 @@ impl DisplayDevice {
         PCWSTR(
           self.device_name.encode_utf16().collect::<Vec<_>>().as_ptr(),
         ),
-        u32::MAX, // ENUM_CURRENT_SETTINGS
+        windows::Win32::Graphics::Gdi::ENUM_DISPLAY_SETTINGS_MODE(
+          u32::MAX,
+        ), // ENUM_CURRENT_SETTINGS
         &raw mut device_mode,
       )
     }
@@ -397,81 +415,41 @@ impl DisplayDevice {
 }
 
 /// Gets all active displays on Windows.
-pub fn all_displays() -> Result<Vec<Display>> {
-  let mut monitor_handles: Vec<isize> = Vec::new();
-
-  // Callback for `EnumDisplayMonitors` to collect monitor handles.
-  extern "system" fn monitor_enum_proc(
-    handle: HMONITOR,
-    _hdc: HDC,
-    _clip: *mut RECT,
-    data: LPARAM,
-  ) -> BOOL {
-    let handles = data.0 as *mut Vec<isize>;
-    unsafe { (*handles).push(handle.0) };
-    true.into()
-  }
-
-  unsafe {
-    EnumDisplayMonitors(
-      HDC::default(),
-      None,
-      Some(monitor_enum_proc),
-      LPARAM(std::ptr::from_mut(&mut monitor_handles) as _),
-    )
-  }
-  .ok()?;
-
-  Ok(monitor_handles.into_iter().map(Display::new).collect())
+// Dispatcher is unused but needed on MacOS so we must take one
+pub fn all_displays(_: &Dispatcher) -> Result<Vec<crate::Display>> {
+  __private_display::all_displays().map(|displays| {
+    displays
+      .into_iter()
+      .map(crate::display::Display::from)
+      .collect()
+  })
 }
 
 /// Gets all display devices on Windows.
-pub fn all_display_devices() -> Result<Vec<DisplayDevice>> {
-  let mut devices = Vec::new();
-  let mut device_index = 0u32;
-
-  loop {
-    let mut display_device = DISPLAY_DEVICEW {
-      cb: std::mem::size_of::<DISPLAY_DEVICEW>().try_into()?,
-      ..Default::default()
-    };
-
-    let result = unsafe {
-      EnumDisplayDevicesW(
-        PCWSTR::null(),
-        device_index,
-        &raw mut display_device,
-        EDD_GET_DEVICE_INTERFACE_NAME,
-      )
-    };
-
-    if !result.as_bool() {
-      break;
-    }
-
-    let device_name = String::from_utf16_lossy(&display_device.DeviceName)
-      .trim_end_matches('\0')
-      .to_string();
-    let device_id = String::from_utf16_lossy(&display_device.DeviceID)
-      .trim_end_matches('\0')
-      .to_string();
-
-    devices.push(DisplayDevice::new(device_name, device_id));
-
-    device_index += 1;
-  }
-
-  Ok(devices)
+// Dispatcher is unused but needed on MacOS so we must take one
+pub fn all_display_devices(
+  _: &Dispatcher,
+) -> Result<Vec<crate::DisplayDevice>> {
+  // Forward to the windows-specific implementation.
+  __private_display::all_display_devices().map(|devices| {
+    devices
+      .into_iter()
+      .map(crate::display::DisplayDevice::from_platform_impl)
+      .collect()
+  })
 }
 
 /// Gets display from point on Windows.
-pub fn display_from_point(point: Point) -> Result<Display> {
-  let displays = all_displays()?;
+pub fn display_from_point(
+  point: Point,
+  dispatcher: &Dispatcher,
+) -> Result<crate::Display> {
+  let displays = all_displays(dispatcher)?;
 
   for display in &displays {
     let bounds = display.bounds()?;
     if bounds.contains_point(&point) {
-      return Ok(display.clone());
+      return Ok(crate::Display::from(display.clone()));
     }
   }
 
@@ -479,14 +457,105 @@ pub fn display_from_point(point: Point) -> Result<Display> {
 }
 
 /// Gets primary display on Windows.
-pub fn primary_display() -> Result<Display> {
-  let displays = all_displays()?;
+pub fn primary_display(dispatcher: &Dispatcher) -> Result<crate::Display> {
+  let displays = all_displays(dispatcher)?;
 
   for display in displays {
     if display.is_primary()? {
-      return Ok(display);
+      return Ok(crate::Display::from(display));
     }
   }
 
   Err(crate::Error::PrimaryDisplayNotFound)
+}
+
+pub(crate) mod __private_display {
+  use windows::{
+    core::PCWSTR,
+    Win32::{
+      Foundation::{BOOL, LPARAM, RECT},
+      Graphics::Gdi::{
+        EnumDisplayDevicesW, EnumDisplayMonitors, DISPLAY_DEVICEW, HDC,
+        HMONITOR,
+      },
+      UI::WindowsAndMessaging::EDD_GET_DEVICE_INTERFACE_NAME,
+    },
+  };
+
+  use crate::platform_impl::{Display, DisplayDevice};
+
+  pub fn all_displays() -> crate::Result<Vec<Display>> {
+    let mut monitor_handles: Vec<isize> = Vec::new();
+
+    // Callback for `EnumDisplayMonitors` to collect monitor handles.
+    extern "system" fn monitor_enum_proc(
+      handle: HMONITOR,
+      _hdc: HDC,
+      _clip: *mut RECT,
+      data: LPARAM,
+    ) -> BOOL {
+      let handles = data.0 as *mut Vec<isize>;
+      unsafe { (*handles).push(handle.0) };
+      true.into()
+    }
+
+    unsafe {
+      EnumDisplayMonitors(
+        HDC::default(),
+        None,
+        Some(monitor_enum_proc),
+        LPARAM(std::ptr::from_mut(&mut monitor_handles) as _),
+      )
+    }
+    .ok()?;
+
+    Ok(monitor_handles.into_iter().map(Display::new).collect())
+  }
+
+  /// Gets all display devices on Windows. Does not take a dispatcher (not
+  /// callable from platform agnostic code).
+  pub fn all_display_devices() -> crate::Result<Vec<DisplayDevice>> {
+    let mut devices = Vec::new();
+    let mut device_index = 0u32;
+
+    loop {
+      let mut display_device = DISPLAY_DEVICEW {
+        cb: std::mem::size_of::<DISPLAY_DEVICEW>().try_into().map_err(
+          |e| {
+            crate::Error::Platform(format!(
+              "Failed to cast size of DISPLAY_DEVICEW: {e}"
+            ))
+          },
+        )?,
+        ..Default::default()
+      };
+
+      let result = unsafe {
+        EnumDisplayDevicesW(
+          PCWSTR::null(),
+          device_index,
+          &raw mut display_device,
+          EDD_GET_DEVICE_INTERFACE_NAME,
+        )
+      };
+
+      if !result.as_bool() {
+        break;
+      }
+
+      let device_name =
+        String::from_utf16_lossy(&display_device.DeviceName)
+          .trim_end_matches('\0')
+          .to_string();
+      let device_id = String::from_utf16_lossy(&display_device.DeviceID)
+        .trim_end_matches('\0')
+        .to_string();
+
+      devices.push(DisplayDevice::new(device_name, device_id));
+
+      device_index += 1;
+    }
+
+    Ok(devices)
+  }
 }

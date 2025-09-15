@@ -1,25 +1,24 @@
 mod com;
 mod display;
-mod event_listener;
 mod event_loop;
-mod event_loop_dispatcher;
-mod event_loop_installer;
-mod event_window;
 mod keyboard_hook;
 mod native_window;
 mod platform;
 mod single_instance;
-mod window_event_hook;
+mod window_listener;
 
 pub use com::*;
 pub use display::*;
-pub use event_listener::*;
 pub use event_loop::*;
-pub use event_loop_dispatcher::*;
-pub use event_loop_installer::*;
-pub use event_window::*;
 pub use keyboard_hook::*;
 pub use native_window::*;
 pub use platform::*;
 pub use single_instance::*;
-pub use window_event_hook::*;
+pub use window_listener::*;
+
+pub mod prelude {
+  pub use super::{
+    native_window::{CornerStyle, NativeWindowWindowsExt},
+    platform::Platform,
+  };
+}

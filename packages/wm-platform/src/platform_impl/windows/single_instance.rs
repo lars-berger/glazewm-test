@@ -1,4 +1,3 @@
-use anyhow::{bail, Context, Result};
 use windows::{
   core::{w, PCWSTR},
   Win32::{
@@ -24,13 +23,19 @@ const APP_GUID: PCWSTR =
 impl SingleInstance {
   /// Creates a new system-wide mutex to ensure that only one instance of
   /// the application is running.
-  pub fn new() -> Result<Self> {
-    let handle = unsafe { CreateMutexW(None, true, APP_GUID) }
-      .context("Failed to create single instance mutex.")?;
+  pub fn new() -> crate::Result<Self> {
+    let handle =
+      unsafe { CreateMutexW(None, true, APP_GUID) }.map_err(|e| {
+        crate::Error::Platform(format!(
+          "Failed to create single instance mutex: {e}"
+        ))
+      })?;
 
     if let Err(err) = unsafe { GetLastError() } {
       if err == ERROR_ALREADY_EXISTS.into() {
-        bail!("Another instance of the application is already running.");
+        return Err(crate::Error::Platform(
+          "Another instance of the application is already running.".into(),
+        ));
       }
     }
 

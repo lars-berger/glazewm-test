@@ -1,6 +1,4 @@
-use crate::Rect;
-
-use crate::{platform_impl, Result};
+use crate::{platform_impl, Rect, Result};
 
 /// Unique identifier for a display.
 ///
@@ -12,8 +10,8 @@ use crate::{platform_impl, Result};
 /// - **macOS**: `u32` (`CGDirectDisplayID`)
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DisplayId(
-  #[cfg(target_os = "windows")] pub(crate) isize,
-  #[cfg(target_os = "macos")] pub(crate) u32,
+  #[cfg(win)] pub(crate) isize,
+  #[cfg(mac)] pub(crate) u32,
 );
 
 /// Unique identifier for a display device.
@@ -26,8 +24,8 @@ pub struct DisplayId(
 /// - **macOS**: `u32` (CGUUID as u32)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DisplayDeviceId(
-  #[cfg(target_os = "windows")] pub(crate) String,
-  #[cfg(target_os = "macos")] pub(crate) u32,
+  #[cfg(win)] pub(crate) String,
+  #[cfg(mac)] pub(crate) u32,
 );
 
 /// Represents a logical display space where windows can be placed.
@@ -40,6 +38,12 @@ pub struct DisplayDeviceId(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Display {
   pub(crate) inner: platform_impl::Display,
+}
+
+impl From<platform_impl::Display> for Display {
+  fn from(inner: platform_impl::Display) -> Self {
+    Self { inner }
+  }
 }
 
 impl Display {
@@ -146,12 +150,23 @@ pub enum OutputTechnology {
 /// built-in laptop screen.
 ///
 /// TODO: Add `PartialEq` and `Eq`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayDevice {
   pub(crate) inner: platform_impl::DisplayDevice,
 }
 
+impl From<platform_impl::DisplayDevice> for DisplayDevice {
+  fn from(inner: platform_impl::DisplayDevice) -> Self {
+    Self { inner }
+  }
+}
+
 impl DisplayDevice {
+  pub(crate) fn from_platform_impl(
+    device: crate::platform_impl::DisplayDevice,
+  ) -> Self {
+    Self { inner: device }
+  }
   /// Gets the unique identifier for this display device.
   #[must_use]
   pub fn id(&self) -> DisplayDeviceId {
