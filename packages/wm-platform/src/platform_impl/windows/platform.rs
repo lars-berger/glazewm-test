@@ -422,50 +422,8 @@ impl Platform {
     }
 
     Err(crate::Error::Platform(format!(
-      "Program path is not valid for command '{}'.",
-      command
+      "Program path is not valid for command '{command}'."
     )))
-  }
-
-  /// Runs the specified program with the given arguments.
-  pub fn run_command(
-    program: &str,
-    args: &str,
-    hide_window: bool,
-  ) -> crate::Result<()> {
-    let home_dir = home::home_dir()
-      .ok_or(crate::Error::Platform(
-        "Failed to get home directory".into(),
-      ))?
-      .to_str()
-      .ok_or(crate::Error::Platform("Invalid home directory.".into()))?
-      .to_owned();
-
-    // Inlining the wide variables within the `SHELLEXECUTEINFOW` struct
-    // causes issues where the pointer is dropped while `ShellExecuteExW`
-    // is using it. This is likely a `windows-rs` bug, and we can avoid
-    // it by keeping separate variables for the wide strings.
-    let program_wide = to_wide(program);
-    let args_wide = to_wide(args);
-    let home_dir_wide = to_wide(&home_dir);
-
-    // Using the built-in `Command::new` function in Rust launches the
-    // program as a subprocess. This prevents Windows from cleaning up
-    // handles held by our process (e.g. the IPC server port) until the
-    // subprocess exits.
-    let mut exec_info = SHELLEXECUTEINFOW {
-      #[allow(clippy::cast_possible_truncation)]
-      cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-      lpFile: PCWSTR(program_wide.as_ptr()),
-      lpParameters: PCWSTR(args_wide.as_ptr()),
-      lpDirectory: PCWSTR(home_dir_wide.as_ptr()),
-      nShow: if hide_window { SW_HIDE } else { SW_NORMAL }.0 as _,
-      fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
-      ..Default::default()
-    };
-
-    unsafe { ShellExecuteExW(&raw mut exec_info) }?;
-    Ok(())
   }
 
   pub fn show_error_dialog(title: &str, message: &str) {
